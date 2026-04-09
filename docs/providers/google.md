@@ -1,6 +1,6 @@
 ---
 title: "Google (Gemini)"
-summary: "Google Gemini setup (API key + OAuth, image generation, media understanding, TTS, web search)"
+summary: "Google Gemini setup (API key + OAuth, image generation, media understanding, web search)"
 read_when:
   - You want to use Google Gemini models with OpenClaw
   - You need the API key or OAuth auth flow
@@ -9,7 +9,7 @@ read_when:
 # Google (Gemini)
 
 The Google plugin provides access to Gemini models through Google AI Studio, plus
-image generation, media understanding (image/audio/video), text-to-speech, and web search via
+image generation, media understanding (image/audio/video), and web search via
 Gemini Grounding.
 
 - Provider: `google`
@@ -133,11 +133,11 @@ Choose your preferred auth method and follow the setup steps.
 | Chat completions       | Yes               |
 | Image generation       | Yes               |
 | Music generation       | Yes               |
-| Text-to-speech         | Yes               |
 | Image understanding    | Yes               |
 | Audio transcription    | Yes               |
 | Video understanding    | Yes               |
 | Web search (Grounding) | Yes               |
+| Text-to-speech         | Yes               |
 | Thinking/reasoning     | Yes (Gemini 3.1+) |
 | Gemma 4 models         | Yes               |
 
@@ -236,15 +236,35 @@ See [Music Generation](/tools/music-generation) for shared tool parameters, prov
 
 ## Text-to-speech
 
-The bundled `google` speech provider uses the Gemini API TTS path with
-`gemini-3.1-flash-tts-preview`.
+The bundled `google` plugin also registers speech synthesis through Google Cloud
+Text-to-Speech Chirp 3 HD.
 
-- Default voice: `Kore`
-- Auth: `messages.tts.providers.google.apiKey`, `models.providers.google.apiKey`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`
-- Output: WAV for regular TTS attachments, PCM for Talk/telephony
-- Native voice-note output: not supported on this Gemini API path because the API returns PCM rather than Opus
+- Default voice: `en-US-Chirp3-HD-Charon`
+- Auth: Google Application Default Credentials (ADC)
+  - Resolution: `credentialsFile` config -> `GOOGLE_APPLICATION_CREDENTIALS` -> ambient ADC
+- Output formats: `mp3` (audio-file), `ogg_opus` (voice-note), plus `pcm`, `mulaw`, `alaw`
+- Regional endpoints: set `location` (default `global`; regional like `us-central1` supported)
 
-To use Google as the default TTS provider:
+### Quick setup with ADC
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+```
+
+Then enable TTS in config:
+
+```json5
+{
+  messages: {
+    tts: {
+      auto: "always",
+      provider: "google",
+    },
+  },
+}
+```
+
+### With explicit credentials file
 
 ```json5
 {
@@ -254,8 +274,10 @@ To use Google as the default TTS provider:
       provider: "google",
       providers: {
         google: {
-          model: "gemini-3.1-flash-tts-preview",
-          voiceName: "Kore",
+          credentialsFile: "/path/to/service-account.json",
+          voiceId: "en-US-Chirp3-HD-Charon",
+          languageCode: "en-US",
+          speed: 1.0,
         },
       },
     },
@@ -263,20 +285,26 @@ To use Google as the default TTS provider:
 }
 ```
 
-Gemini API TTS accepts expressive square-bracket audio tags in the text, such as
-`[whispers]` or `[laughs]`. To keep tags out of the visible chat reply while
-sending them to TTS, put them inside a `[[tts:text]]...[[/tts:text]]` block:
+### Available voices
 
-```text
-Here is the clean reply text.
+Chirp 3 HD voices (high-quality neural TTS):
 
-[[tts:text]][whispers] Here is the spoken version.[[/tts:text]]
-```
+- `en-US-Chirp3-HD-Charon` (default)
+- `en-US-Chirp3-HD-Aoede`
+- See [Google Cloud TTS voices](https://cloud.google.com/text-to-speech/docs/voices) for full list
 
-<Note>
-A Google Cloud Console API key restricted to the Gemini API is valid for this
-provider. This is not the separate Cloud Text-to-Speech API path.
-</Note>
+### Service account setup
+
+1. Create a Google Cloud project
+2. Enable the Cloud Text-to-Speech API
+3. Create a service account with `roles/cloudml.user` or appropriate permissions
+4. Download the service account JSON key
+5. Set `GOOGLE_APPLICATION_CREDENTIALS` or configure `credentialsFile`
+
+See [Google Cloud Authentication](https://cloud.google.com/docs/authentication) for ADC setup details.
+
+See [Text-to-Speech](/tools/tts) for the shared tool
+parameters, provider selection, and failover behavior.
 
 ## Advanced configuration
 

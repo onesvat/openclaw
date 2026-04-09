@@ -117,5 +117,6 @@ export default definePluginEntry({
     api.registerSpeechProvider(buildGoogleSpeechProvider());
     api.registerVideoGenerationProvider(buildGoogleVideoGenerationProvider());
     api.registerWebSearchProvider(createGeminiWebSearchProvider());
+    api.registerSpeechProvider(buildGoogleSpeechProvider());
   },
 });

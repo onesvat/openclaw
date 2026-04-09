@@ -1,248 +1,218 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildGoogleSpeechProvider, __testing } from "./speech-provider.js";
+import { describe, expect, it } from "vitest";
+import { buildGoogleSpeechProvider } from "./speech-provider.js";
 
-function installGoogleTtsFetchMock(pcm = Buffer.from([1, 0, 2, 0])) {
-  const fetchMock = vi.fn().mockResolvedValue({
-    ok: true,
-    json: async () => ({
-      candidates: [
-        {
-          content: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "audio/L16;codec=pcm;rate=24000",
-                  data: pcm.toString("base64"),
-                },
-              },
-            ],
-          },
-        },
-      ],
-    }),
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
+describe("google speech provider", () => {
+  const provider = buildGoogleSpeechProvider();
 
-describe("Google speech provider", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-    vi.unstubAllEnvs();
+  it("has correct id and label", () => {
+    expect(provider.id).toBe("google");
+    expect(provider.label).toBe("Google Cloud TTS");
   });
 
-  it("synthesizes Gemini PCM as WAV and preserves audio tags in the request text", async () => {
-    const fetchMock = installGoogleTtsFetchMock();
-    const provider = buildGoogleSpeechProvider();
-
-    const result = await provider.synthesize({
-      text: "[whispers] The door is open.",
-      cfg: {},
-      providerConfig: {
-        apiKey: "google-test-key",
-        model: "google/gemini-3.1-flash-tts",
-        voiceName: "Puck",
-      },
-      target: "audio-file",
-      timeoutMs: 12_345,
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: "[whispers] The door is open." }],
-            },
-          ],
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: "Puck",
-                },
-              },
-            },
-          },
-        }),
-      }),
-    );
-    const [, init] = fetchMock.mock.calls[0];
-    expect(new Headers(init.headers).get("x-goog-api-key")).toBe("google-test-key");
-    expect(result.outputFormat).toBe("wav");
-    expect(result.fileExtension).toBe(".wav");
-    expect(result.voiceCompatible).toBe(false);
-    expect(result.audioBuffer.subarray(0, 4).toString("ascii")).toBe("RIFF");
-    expect(result.audioBuffer.subarray(8, 12).toString("ascii")).toBe("WAVE");
-    expect(result.audioBuffer.readUInt32LE(24)).toBe(__testing.GOOGLE_TTS_SAMPLE_RATE);
-    expect(result.audioBuffer.subarray(44)).toEqual(Buffer.from([1, 0, 2, 0]));
+  it("has autoSelectOrder", () => {
+    expect(provider.autoSelectOrder).toBe(15);
   });
 
-  it("falls back to GEMINI_API_KEY and configured Google API base URL", async () => {
-    vi.stubEnv("GEMINI_API_KEY", "env-google-key");
-    const fetchMock = installGoogleTtsFetchMock();
-    const provider = buildGoogleSpeechProvider();
-
-    expect(provider.isConfigured({ providerConfig: {}, timeoutMs: 1 })).toBe(true);
-
-    await provider.synthesize({
-      text: "Read this plainly.",
-      cfg: {
-        models: {
-          providers: {
-            google: {
-              baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-              models: [],
-            },
-          },
-        },
-      },
+  it("isConfigured returns false without credentials", () => {
+    const result = provider.isConfigured({
       providerConfig: {},
-      target: "voice-note",
-      timeoutMs: 10_000,
+      timeoutMs: 30000,
     });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent",
-      expect.any(Object),
-    );
-    const [, init] = fetchMock.mock.calls[0];
-    expect(new Headers(init.headers).get("x-goog-api-key")).toBe("env-google-key");
+    expect(result).toBe(false);
   });
 
-  it("can reuse a configured Google model-provider API key without auth profiles", async () => {
-    const fetchMock = installGoogleTtsFetchMock();
-    const provider = buildGoogleSpeechProvider();
-    const cfg = {
-      models: {
-        providers: {
-          google: {
-            apiKey: "model-provider-google-key",
-            baseUrl: "https://generativelanguage.googleapis.com",
-            models: [],
-          },
-        },
-      },
-    };
-
-    expect(provider.isConfigured({ cfg, providerConfig: {}, timeoutMs: 1 })).toBe(true);
-
-    await provider.synthesize({
-      text: "Use the configured model provider key.",
-      cfg,
-      providerConfig: {},
-      target: "audio-file",
-      timeoutMs: 10_000,
+  it("isConfigured returns true with credentialsFile", () => {
+    const result = provider.isConfigured({
+      providerConfig: { credentialsFile: "/path/to/key.json" },
+      timeoutMs: 30000,
     });
-
-    const [, init] = fetchMock.mock.calls[0];
-    expect(new Headers(init.headers).get("x-goog-api-key")).toBe("model-provider-google-key");
+    expect(result).toBe(true);
   });
 
-  it("returns Gemini PCM directly for telephony synthesis", async () => {
-    const pcm = Buffer.from([3, 0, 4, 0]);
-    installGoogleTtsFetchMock(pcm);
-    const provider = buildGoogleSpeechProvider();
-
-    const result = await provider.synthesizeTelephony?.({
-      text: "Phone call audio.",
-      cfg: {},
-      providerConfig: {
-        apiKey: "google-test-key",
-        voice: "Kore",
-      },
-      timeoutMs: 5_000,
+  it("resolveConfig returns defaults", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: {},
+      cfg: {} as any,
+      timeoutMs: 30000,
     });
-
-    expect(result).toEqual({
-      audioBuffer: pcm,
-      outputFormat: "pcm",
-      sampleRate: 24_000,
-    });
+    expect(config.voiceId).toBe("en-US-Chirp3-HD-Charon");
+    expect(config.location).toBe("global");
+    expect(config.languageCode).toBe("en-US");
   });
 
-  it("resolves provider config and directive overrides", () => {
-    const provider = buildGoogleSpeechProvider();
+  it("resolveConfig derives languageCode from voiceId", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { google: { voiceId: "de-DE-Chirp3-HD-Charon" } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.voiceId).toBe("de-DE-Chirp3-HD-Charon");
+    expect(config.languageCode).toBe("de-DE");
+  });
 
-    expect(
-      provider.resolveConfig?.({
-        cfg: {},
-        rawConfig: {
-          providers: {
-            google: {
-              apiKey: "configured-key",
-              model: "google/gemini-3.1-flash-tts-preview",
-              voice: "Leda",
-            },
-          },
-        },
-        timeoutMs: 1,
+  it("resolveConfig derives languageCode from Turkish voiceId", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { google: { voiceId: "tr-TR-Chirp3-HD-Iapetus" } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.voiceId).toBe("tr-TR-Chirp3-HD-Iapetus");
+    expect(config.languageCode).toBe("tr-TR");
+  });
+
+  it("resolveTalkConfig merges base and talk config", () => {
+    const config = provider.resolveTalkConfig!({
+      baseTtsConfig: { google: { voiceId: "en-US-Chirp3-HD-Charon" } },
+      talkProviderConfig: { voiceId: "de-DE-Chirp3-HD-Charon", speed: 1.2 },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.voiceId).toBe("de-DE-Chirp3-HD-Charon");
+    expect(config.speed).toBe(1.2);
+  });
+
+  it("resolveTalkOverrides returns overrides", () => {
+    const overrides = provider.resolveTalkOverrides!({
+      talkProviderConfig: {},
+      params: { voiceId: "en-US-Chirp3-HD-Aoede", speed: 0.9 },
+    });
+    expect(overrides?.voiceId).toBe("en-US-Chirp3-HD-Aoede");
+    expect(overrides?.speed).toBe(0.9);
+  });
+
+  it("resolveConfig accepts valid speed in range", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { google: { speed: 1.5 } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.speed).toBe(1.5);
+  });
+
+  it("resolveConfig accepts speed at minimum (0.25)", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { google: { speed: 0.25 } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.speed).toBe(0.25);
+  });
+
+  it("resolveConfig accepts speed at maximum (4.0)", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { google: { speed: 4.0 } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.speed).toBe(4.0);
+  });
+
+  it("resolveConfig ignores invalid speed values", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { google: { speed: "invalid" } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.speed).toBe(undefined);
+  });
+
+  it("resolveConfig accepts regional location", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { google: { location: "us-central1" } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.location).toBe("us-central1");
+  });
+
+  it("resolveConfig accepts outputFormat pcm", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { google: { outputFormat: "pcm" } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.outputFormat).toBe("pcm");
+  });
+
+  it("resolveConfig accepts outputFormat ogg_opus", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { google: { outputFormat: "ogg_opus" } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.outputFormat).toBe("ogg_opus");
+  });
+
+  it("synthesize throws error for missing credentialsFile", async () => {
+    await expect(
+      provider.synthesize({
+        text: "Hello",
+        cfg: {} as any,
+        providerConfig: {},
+        providerOverrides: {},
+        target: "audio-file",
+        timeoutMs: 30000,
       }),
-    ).toEqual({
-      apiKey: "configured-key",
-      baseUrl: undefined,
-      model: "gemini-3.1-flash-tts-preview",
-      voiceName: "Leda",
-    });
-
-    expect(
-      provider.parseDirectiveToken?.({
-        key: "google_voice",
-        value: "Aoede",
-        policy: {
-          enabled: true,
-          allowText: true,
-          allowProvider: true,
-          allowVoice: true,
-          allowModelId: true,
-          allowVoiceSettings: true,
-          allowNormalization: true,
-          allowSeed: true,
-        },
-      }),
-    ).toEqual({
-      handled: true,
-      overrides: {
-        voiceName: "Aoede",
-      },
-    });
-
-    expect(
-      provider.parseDirectiveToken?.({
-        key: "google_model",
-        value: "gemini-3.1-flash-tts-preview",
-        policy: {
-          enabled: true,
-          allowText: true,
-          allowProvider: true,
-          allowVoice: true,
-          allowModelId: true,
-          allowVoiceSettings: true,
-          allowNormalization: true,
-          allowSeed: true,
-        },
-      }),
-    ).toEqual({
-      handled: true,
-      overrides: {
-        model: "gemini-3.1-flash-tts-preview",
-      },
-    });
+    ).rejects.toThrow("Google TTS requires credentialsFile");
   });
 
-  it("lists Gemini prebuilt TTS voices", async () => {
-    const provider = buildGoogleSpeechProvider();
+  it("synthesize throws error for non-existent credentialsFile", async () => {
+    await expect(
+      provider.synthesize({
+        text: "Hello",
+        cfg: {} as any,
+        providerConfig: { credentialsFile: "/nonexistent/path/key.json" },
+        providerOverrides: {},
+        target: "audio-file",
+        timeoutMs: 30000,
+      }),
+    ).rejects.toThrow("Google credentials file not found");
+  });
 
-    await expect(provider.listVoices?.({ providerConfig: {} })).resolves.toEqual(
-      expect.arrayContaining([
-        { id: "Kore", name: "Kore" },
-        { id: "Puck", name: "Puck" },
-      ]),
-    );
+  it("synthesize throws error for speed below minimum", async () => {
+    await expect(
+      provider.synthesize({
+        text: "Hello",
+        cfg: {} as any,
+        providerConfig: { credentialsFile: "/tmp/test.json" },
+        providerOverrides: { speed: 0.1 },
+        target: "audio-file",
+        timeoutMs: 30000,
+      }),
+    ).rejects.toThrow("speed");
+  });
+
+  it("synthesize throws error for speed above maximum", async () => {
+    await expect(
+      provider.synthesize({
+        text: "Hello",
+        cfg: {} as any,
+        providerConfig: { credentialsFile: "/tmp/test.json" },
+        providerOverrides: { speed: 5.0 },
+        target: "audio-file",
+        timeoutMs: 30000,
+      }),
+    ).rejects.toThrow("speed");
+  });
+
+  it("resolveConfig uses providers.google path", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: { providers: { google: { voiceId: "fr-FR-Chirp3-HD-Charon" } } },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.voiceId).toBe("fr-FR-Chirp3-HD-Charon");
+  });
+
+  it("resolveConfig prefers providers.google over google", () => {
+    const config = provider.resolveConfig!({
+      rawConfig: {
+        google: { voiceId: "en-US-Chirp3-HD-Charon" },
+        providers: { google: { voiceId: "es-ES-Chirp3-HD-Charon" } },
+      },
+      cfg: {} as any,
+      timeoutMs: 30000,
+    });
+    expect(config.voiceId).toBe("es-ES-Chirp3-HD-Charon");
   });
 });

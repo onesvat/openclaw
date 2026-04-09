@@ -9,13 +9,13 @@ title: "Text-to-Speech"
 
 # Text-to-speech (TTS)
 
-OpenClaw can convert outbound replies into audio using ElevenLabs, Google Gemini, Microsoft, MiniMax, or OpenAI.
+OpenClaw can convert outbound replies into audio using ElevenLabs, Google, Microsoft, MiniMax, or OpenAI.
 It works anywhere OpenClaw can send audio.
 
 ## Supported services
 
 - **ElevenLabs** (primary or fallback provider)
-- **Google Gemini** (primary or fallback provider; uses Gemini API TTS)
+- **Google** (primary or fallback provider; uses Google Cloud Text-to-Speech Chirp 3 HD)
 - **Microsoft** (primary or fallback provider; current bundled implementation uses `node-edge-tts`)
 - **MiniMax** (primary or fallback provider; uses the T2A v2 API)
 - **OpenAI** (primary or fallback provider; also used for summaries)
@@ -35,14 +35,15 @@ or ElevenLabs.
 
 ## Optional keys
 
-If you want OpenAI, ElevenLabs, Google Gemini, or MiniMax:
+If you want OpenAI, ElevenLabs, Google, or MiniMax:
 
 - `ELEVENLABS_API_KEY` (or `XI_API_KEY`)
-- `GEMINI_API_KEY` (or `GOOGLE_API_KEY`)
+- `GOOGLE_APPLICATION_CREDENTIALS` (path to service account JSON for Google Cloud TTS)
 - `MINIMAX_API_KEY`
 - `OPENAI_API_KEY`
 
 Microsoft speech does **not** require an API key.
+Google speech uses **Google Application Default Credentials (ADC)**.
 
 If multiple providers are configured, the selected provider is used first and the others are fallback options.
 Auto-summary uses the configured `summaryModel` (or `agents.defaults.model.primary`),
@@ -54,6 +55,8 @@ so that provider must also be authenticated if you enable summaries.
 - [OpenAI Audio API reference](https://platform.openai.com/docs/api-reference/audio)
 - [ElevenLabs Text to Speech](https://elevenlabs.io/docs/api-reference/text-to-speech)
 - [ElevenLabs Authentication](https://elevenlabs.io/docs/api-reference/authentication)
+- [Google Cloud Text-to-Speech](https://cloud.google.com/text-to-speech/docs)
+- [Google Cloud TTS Chirp 3 HD](https://cloud.google.com/text-to-speech/docs/chirp3-hd)
 - [MiniMax T2A v2 API](https://platform.minimaxi.com/document/T2A%20V2)
 - [node-edge-tts](https://github.com/SchneeHertz/node-edge-tts)
 - [Microsoft Speech output formats](https://learn.microsoft.com/azure/ai-services/speech-service/rest-text-to-speech#audio-outputs)
@@ -148,6 +151,48 @@ Full schema is in [Gateway configuration](/gateway/configuration).
 }
 ```
 
+### Google primary (ADC/service account)
+
+```json5
+{
+  messages: {
+    tts: {
+      auto: "always",
+      provider: "google",
+      providers: {
+        google: {
+          voiceId: "en-US-Chirp3-HD-Charon",
+          languageCode: "en-US",
+          location: "global",
+          outputFormat: "mp3",
+          speed: 1.0,
+        },
+      },
+    },
+  },
+}
+```
+
+Or with explicit credentials file:
+
+```json5
+{
+  messages: {
+    tts: {
+      auto: "always",
+      provider: "google",
+      providers: {
+        google: {
+          credentialsFile: "/path/to/service-account.json",
+          voiceId: "en-US-Chirp3-HD-Charon",
+          languageCode: "en-US",
+        },
+      },
+    },
+  },
+}
+```
+
 ### MiniMax primary
 
 ```json5
@@ -171,32 +216,6 @@ Full schema is in [Gateway configuration](/gateway/configuration).
   },
 }
 ```
-
-### Google Gemini primary
-
-```json5
-{
-  messages: {
-    tts: {
-      auto: "always",
-      provider: "google",
-      providers: {
-        google: {
-          apiKey: "gemini_api_key",
-          model: "gemini-3.1-flash-tts-preview",
-          voiceName: "Kore",
-        },
-      },
-    },
-  },
-}
-```
-
-Google Gemini TTS uses the Gemini API key path. A Google Cloud Console API key
-restricted to the Gemini API is valid here, and it is the same style of key used
-by the bundled Google image-generation provider. Resolution order is
-`messages.tts.providers.google.apiKey` -> `models.providers.google.apiKey` ->
-`GEMINI_API_KEY` -> `GOOGLE_API_KEY`.
 
 ### Disable Microsoft speech
 
@@ -278,7 +297,10 @@ Then run:
 - `maxTextLength`: hard cap for TTS input (chars). `/tts audio` fails if exceeded.
 - `timeoutMs`: request timeout (ms).
 - `prefsPath`: override the local prefs JSON path (provider/limit/summary).
-- `apiKey` values fall back to env vars (`ELEVENLABS_API_KEY`/`XI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, `MINIMAX_API_KEY`, `OPENAI_API_KEY`).
+- `apiKey` values fall back to env vars (`ELEVENLABS_API_KEY`/`XI_API_KEY`, `MINIMAX_API_KEY`, `OPENAI_API_KEY`).
+- Google speech uses Google Application Default Credentials (ADC):
+  - Resolution order: `messages.tts.providers.google.credentialsFile` -> `GOOGLE_APPLICATION_CREDENTIALS` -> ambient ADC
+  - See [Google Cloud Authentication](https://cloud.google.com/docs/authentication) for ADC setup
 - `providers.elevenlabs.baseUrl`: override ElevenLabs API base URL.
 - `providers.openai.baseUrl`: override the OpenAI TTS endpoint.
   - Resolution order: `messages.tts.providers.openai.baseUrl` -> `OPENAI_TTS_BASE_URL` -> `https://api.openai.com/v1`
@@ -296,10 +318,6 @@ Then run:
 - `providers.minimax.speed`: playback speed `0.5..2.0` (default 1.0).
 - `providers.minimax.vol`: volume `(0, 10]` (default 1.0; must be greater than 0).
 - `providers.minimax.pitch`: pitch shift `-12..12` (default 0).
-- `providers.google.model`: Gemini TTS model (default `gemini-3.1-flash-tts-preview`).
-- `providers.google.voiceName`: Gemini prebuilt voice name (default `Kore`; `voice` is also accepted).
-- `providers.google.baseUrl`: override the Gemini API base URL. Only `https://generativelanguage.googleapis.com` is accepted.
-  - If `messages.tts.providers.google.apiKey` is omitted, TTS can reuse `models.providers.google.apiKey` before env fallback.
 - `providers.microsoft.enabled`: allow Microsoft speech usage (default `true`; no API key).
 - `providers.microsoft.voice`: Microsoft neural voice name (e.g. `en-US-MichelleNeural`).
 - `providers.microsoft.lang`: language code (e.g. `en-US`).
@@ -310,6 +328,15 @@ Then run:
 - `providers.microsoft.proxy`: proxy URL for Microsoft speech requests.
 - `providers.microsoft.timeoutMs`: request timeout override (ms).
 - `edge.*`: legacy alias for the same Microsoft settings.
+- `providers.google.voiceId`: Google Cloud TTS voice name (default `en-US-Chirp3-HD-Charon`).
+  - Chirp 3 HD voices: `en-US-Chirp3-HD-Charon`, `en-US-Chirp3-HD-Aoede`, etc.
+  - See [Google Cloud TTS voices](https://cloud.google.com/text-to-speech/docs/voices) for full list
+- `providers.google.languageCode`: language code (e.g. `en-US`, derived from voiceId if not set).
+- `providers.google.location`: Google Cloud region (default `global`; regional endpoints like `us-central1` also supported).
+- `providers.google.outputFormat`: audio format (`mp3`, `ogg_opus`, `pcm`, `mulaw`, `alaw`).
+  - Default: `mp3` for audio-file, `ogg_opus` for voice-note
+- `providers.google.speed`: speaking rate `0.25..4.0` (default 1.0).
+- `providers.google.credentialsFile`: path to service account JSON (optional; falls back to ADC).
 
 ## Model-driven overrides (default on)
 
@@ -334,9 +361,9 @@ Here you go.
 
 Available directive keys (when enabled):
 
-- `provider` (registered speech provider id, for example `openai`, `elevenlabs`, `google`, `minimax`, or `microsoft`; requires `allowProvider: true`)
-- `voice` (OpenAI voice), `voiceName` / `voice_name` / `google_voice` (Google voice), or `voiceId` (ElevenLabs / MiniMax)
-- `model` (OpenAI TTS model, ElevenLabs model id, or MiniMax model) or `google_model` (Google TTS model)
+- `provider` (registered speech provider id, for example `openai`, `elevenlabs`, `minimax`, or `microsoft`; requires `allowProvider: true`)
+- `voice` (OpenAI voice) or `voiceId` (ElevenLabs / MiniMax)
+- `model` (OpenAI TTS model, ElevenLabs model id, or MiniMax model)
 - `stability`, `similarityBoost`, `style`, `speed`, `useSpeakerBoost`
 - `vol` / `volume` (MiniMax volume, 0-10)
 - `pitch` (MiniMax pitch, -12 to 12)
@@ -396,7 +423,6 @@ These override `messages.tts.*` for that host.
 - **Other channels**: MP3 (`mp3_44100_128` from ElevenLabs, `mp3` from OpenAI).
   - 44.1kHz / 128kbps is the default balance for speech clarity.
 - **MiniMax**: MP3 (`speech-2.8-hd` model, 32kHz sample rate). Voice-note format not natively supported; use OpenAI or ElevenLabs for guaranteed Opus voice messages.
-- **Google Gemini**: Gemini API TTS returns raw 24kHz PCM. OpenClaw wraps it as WAV for audio attachments and returns PCM directly for Talk/telephony. Native Opus voice-note format is not supported by this path.
 - **Microsoft**: uses `microsoft.outputFormat` (default `audio-24khz-48kbitrate-mono-mp3`).
   - The bundled transport accepts an `outputFormat`, but not all formats are available from the service.
   - Output format values follow Microsoft Speech output formats (including Ogg/WebM Opus).
